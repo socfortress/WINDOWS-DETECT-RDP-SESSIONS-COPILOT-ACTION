@@ -1,279 +1,205 @@
-# PowerShell Active Response Template
+# PowerShell Detect RDP Sessions Template
 
-This repository serves as a template for creating PowerShell-based active response scripts for security automation and incident response. The template provides a standardized structure and common functions to ensure consistent logging, error handling, and execution flow across all active response scripts.
+This repository provides a template for PowerShell-based active response scripts for security automation and incident response. The template ensures consistent logging, error handling, and execution flow for detecting active and idle RDP sessions on Windows systems.
+
+---
 
 ## Overview
 
-The `automation-template.ps1` file is the foundation for all PowerShell active response scripts. It provides a robust framework with built-in logging, error handling, and standardized output formatting suitable for integration with security orchestration platforms, SIEM systems, and incident response workflows.
+The `Detect-RDPSessions.ps1` script enumerates all active Remote Desktop Protocol (RDP) sessions, flags those that have been idle for a configurable threshold, and logs all actions, results, and errors in both a script log and an active-response log. This makes it suitable for integration with SOAR platforms, SIEMs, and incident response workflows.
+
+---
 
 ## Template Structure
 
 ### Core Components
 
-The template includes the following essential components:
+- **Parameter Definitions**: Configurable script parameters
+- **Logging Framework**: Consistent logging with timestamps and rotation
+- **Flagging Logic**: Identifies idle or suspicious RDP sessions
+- **JSON Output**: Standardized response format
+- **Execution Timing**: Performance monitoring
 
-1. **Parameter Definitions** - Configurable script parameters
-2. **Logging Framework** - Comprehensive logging with rotation
-3. **Error Handling** - Structured exception management
-4. **JSON Output** - Standardized response format
-5. **Execution Timing** - Performance monitoring
+---
 
 ## How Scripts Are Invoked
 
 ### Command Line Execution
+
 ```powershell
-.\automation-template.ps1 [-MaxWaitSeconds <int>] [-LogPath <string>] [-ARLog <string>]
+.\Detect-RDPSessions.ps1 [-IdleThresholdMinutes <int>] [-LogPath <string>] [-ARLog <string>]
 ```
 
 ### Parameters
 
-| Parameter | Type | Default Value | Description |
-|-----------|------|---------------|-------------|
-| `MaxWaitSeconds` | int | 300 | Maximum execution time in seconds before timeout |
-| `LogPath` | string | `$env:TEMP\Generic-Automation.log` | Path for detailed execution logs |
-| `ARLog` | string | `C:\Program Files (x86)\ossec-agent\active-response\active-responses.log` | Path for active response JSON output |
+| Parameter            | Type   | Default Value                                                    | Description                                  |
+|----------------------|--------|------------------------------------------------------------------|----------------------------------------------|
+| `IdleThresholdMinutes` | int  | `30`                                                             | Idle time threshold (minutes) for flagging   |
+| `LogPath`            | string | `$env:TEMP\Detect-RDPSessions.log`                               | Path for execution logs                      |
+| `ARLog`              | string | `C:\Program Files (x86)\ossec-agent\active-response\active-responses.log` | Path for active response JSON output         |
+
+---
 
 ### Example Invocations
 
 ```powershell
 # Basic execution with default parameters
-.\automation-template.ps1
+.\Detect-RDPSessions.ps1
 
-# Custom timeout and log paths
-.\automation-template.ps1 -MaxWaitSeconds 600 -LogPath "C:\Logs\my-script.log"
+# Custom idle threshold and log path
+.\Detect-RDPSessions.ps1 -IdleThresholdMinutes 60 -LogPath "C:\Logs\RDP.log"
 
 # Integration with OSSEC/Wazuh active response
-.\automation-template.ps1 -ARLog "C:\ossec\active-responses.log"
+.\Detect-RDPSessions.ps1 -ARLog "C:\ossec\active-responses.log"
 ```
+
+---
 
 ## Template Functions
 
 ### `Write-Log`
-**Purpose**: Provides standardized logging with multiple severity levels and console output.
+**Purpose**: Standardized logging with severity levels and console output.
 
 **Parameters**:
-- `Message` (string): The log message to write
+- `Message` (string): The log message
 - `Level` (ValidateSet): Log level - 'INFO', 'WARN', 'ERROR', 'DEBUG'
 
 **Features**:
-- Timestamp formatting with milliseconds
-- Color-coded console output based on severity
-- File logging with structured format
-- Verbose debugging support
+- Timestamped output
+- Color-coded console output
+- File logging
+- Verbose/debug support
 
 **Usage**:
 ```powershell
-Write-Log "Process started successfully" 'INFO'
-Write-Log "Configuration file not found" 'WARN'
-Write-Log "Critical error occurred" 'ERROR'
-Write-Log "Debug information" 'DEBUG'
+Write-Log "Flagged: $($session.user) idle $($session.idle_time)" 'WARN'
+Write-Log "JSON reports (full + flagged) appended to $ARLog" 'INFO'
 ```
 
+---
+
 ### `Rotate-Log`
-**Purpose**: Manages log file size and implements automatic log rotation to prevent disk space issues.
+**Purpose**: Manages log file size and rotation.
 
 **Features**:
-- Monitors log file size (default: 100KB threshold)
-- Maintains configurable number of historical log files (default: 5)
-- Automatic rotation when size limit exceeded
-- Preserves log history for forensic analysis
+- Monitors log file size (default: 100KB)
+- Maintains a configurable number of backups (default: 5)
+- Rotates logs automatically
 
 **Configuration Variables**:
-- `$LogMaxKB`: Maximum log file size in KB before rotation
-- `$LogKeep`: Number of rotated log files to retain
+- `$LogMaxKB`: Max log file size in KB
+- `$LogKeep`: Number of rotated logs to retain
+
+---
 
 ## Script Execution Flow
 
-### 1. Initialization Phase
-- Parameter validation and default assignment
-- Error action preference configuration
-- Environment variable collection
-- Log rotation check and execution
+1. **Initialization**
+   - Parameter validation and assignment
+   - Error action preference
+   - Log rotation
+   - Start time logging
 
-### 2. Execution Phase
-- Script start logging with timestamp
-- Main action logic execution (customizable section)
-- Real-time logging of operations
-- Progress monitoring and timeout handling
+2. **Execution**
+   - Enumerates active RDP sessions using `quser`
+   - Flags sessions idle for more than the threshold
+   - Logs findings
 
-### 3. Completion Phase
-- JSON result formatting and output
-- Active response log appending
-- Execution duration calculation
-- Cleanup and resource disposal
+3. **Completion**
+   - Outputs full inventory and flagged sessions as JSON to the active response log
+   - Logs script end and duration
+   - Displays summary in console
 
-### 4. Error Handling
-- Structured exception catching
-- Error message logging
-- JSON error response formatting
-- Graceful failure handling
+4. **Error Handling**
+   - Catches and logs exceptions
+   - Outputs error details as JSON
+
+---
 
 ## JSON Output Format
 
-All scripts output standardized JSON responses to the active response log:
+### Full Report Example
 
-### Success Response
 ```json
 {
-  "timestamp": "2025-07-18T10:30:45.123Z",
   "host": "HOSTNAME",
-  "action": "script_action_name",
-  "status": "success",
-  "result": "Action completed successfully",
-  "data": {}
+  "timestamp": "2025-07-22T10:30:45.123Z",
+  "action": "detect_rdp_sessions",
+  "session_count": 3,
+  "sessions": [
+    {
+      "user": "alice",
+      "session_id": "2",
+      "state": "Active",
+      "idle_time": "00:45",
+      "logon_time": "7/22/2025 09:00",
+      "flagged_reasons": []
+    }
+  ]
 }
 ```
 
-### Error Response
+### Flagged Sessions Example
+
 ```json
 {
-  "timestamp": "2025-07-18T10:30:45.123Z",
   "host": "HOSTNAME",
-  "action": "generic_error",
+  "timestamp": "2025-07-22T10:30:45.123Z",
+  "action": "detect_rdp_sessions_flagged",
+  "flagged_count": 1,
+  "flagged_sessions": [
+    {
+      "user": "bob",
+      "session_id": "3",
+      "state": "Active",
+      "idle_time": "01:15",
+      "logon_time": "7/22/2025 08:00",
+      "flagged_reasons": ["Idle for 01:15"]
+    }
+  ]
+}
+```
+
+### Error Example
+
+```json
+{
+  "timestamp": "2025-07-22T10:31:10.456Z",
+  "host": "HOSTNAME",
+  "action": "detect_rdp_sessions",
   "status": "error",
-  "error": "Detailed error message"
+  "error": "Access is denied"
 }
 ```
+
+---
 
 ## Implementation Guidelines
 
-### 1. Customizing the Template
-1. Copy `automation-template.ps1` to your new script name
-2. Replace the action logic section between the comment markers
-3. Update the action name in the JSON output
-4. Add any additional parameters as needed
-5. Implement your specific functionality
+1. Use the provided logging and error handling functions.
+2. Customize the flagging logic as needed for your environment.
+3. Ensure JSON output matches your SOAR/SIEM requirements.
+4. Test thoroughly in a non-production environment.
 
-### 2. Best Practices
-- Always use the provided logging functions
-- Implement proper error handling for all operations
-- Include meaningful progress messages
-- Test timeout scenarios
-- Validate all input parameters
-- Document any additional functions or parameters
-
-### 3. Integration Considerations
-- Ensure proper file permissions for log paths
-- Configure appropriate timeout values for your use case
-- Test script execution in target environments
-- Validate JSON output format compatibility
-- Consider network connectivity requirements
+---
 
 ## Security Considerations
 
-- Scripts should run with minimal required privileges
-- Validate all input parameters to prevent injection attacks
-- Implement proper access controls for log files
-- Use secure communication channels when applicable
-- Log all security-relevant actions and decisions
+- Run with the minimum required privileges.
+- Validate all input parameters.
+- Secure log files and output locations.
+- Monitor for errors and failed inventory.
+
+---
 
 ## Troubleshooting
 
-### Common Issues
-1. **Permission Errors**: Ensure script has write access to log paths
-2. **Timeout Issues**: Adjust `MaxWaitSeconds` parameter for long-running operations
-3. **Log Rotation**: Check disk space and file permissions for log directory
-4. **JSON Format**: Validate output against expected schema
+- **Permission Errors**: Run as Administrator.
+- **No RDP Sessions**: Ensure RDP is enabled and sessions are active.
+- **Log Output**: Check file permissions and disk space.
 
-### Debug Mode
-Enable verbose logging by running with `-Verbose` parameter:
-```powershell
-.\automation-template.ps1 -Verbose
-```
-
-## Contributing
-
-When creating new active response scripts based on this template:
-1. Maintain the core logging and error handling structure
-2. Follow PowerShell best practices and coding standards
-3. Document any additional functions or parameters
-4. Test thoroughly in isolated environments
-5. Include usage examples and expected outputs
-
-## Automated Releases
-
-This repository includes automated release functionality via GitHub Actions that creates production-ready PowerShell scripts for distribution.
-
-### Release Features
-
-- **Automated Script Packaging**: Adds metadata headers with version, build date, and repository information
-- **Multiple Distribution Formats**: Creates both versioned and generic script names
-- **Integrity Verification**: Generates SHA256 checksums for all release files
-- **Automated Installer**: Provides a PowerShell installer script for easy deployment
-- **Production Documentation**: Includes comprehensive usage and security documentation
-
-### Creating Releases
-
-#### Method 1: Git Tags (Recommended)
-```bash
-# Create and push a version tag
-git tag v1.0.0
-git push origin v1.0.0
-```
-
-#### Method 2: Manual Workflow Trigger
-1. Go to the **Actions** tab in GitHub
-2. Select **"Create PowerShell Script Release"**
-3. Click **"Run workflow"**
-4. Enter the version (e.g., `v1.0.0`) and script name
-5. Click **"Run workflow"**
-
-### Release Artifacts
-
-Each release contains:
-- `{script-name}.ps1` - Production script with metadata
-- `{script-name}-{version}.ps1` - Versioned production script
-- `install.ps1` - Automated installation script
-- `checksums.txt` - SHA256 file integrity checksums
-- `README.md` - Release-specific documentation
-
-### Distribution Methods
-
-#### Option 1: Automated Installation
-```powershell
-# Download and run the installer
-Invoke-WebRequest -Uri "https://github.com/{owner}/{repo}/releases/download/v1.0.0/install.ps1" -OutFile "install.ps1"
-.\install.ps1
-```
-
-#### Option 2: Direct Download
-```powershell
-# Download script directly
-Invoke-WebRequest -Uri "https://github.com/{owner}/{repo}/releases/download/v1.0.0/script-name.ps1" -OutFile "script-name.ps1"
-```
-
-#### Option 3: One-liner Execution
-```powershell
-# Execute directly from URL (use with caution)
-Invoke-WebRequest -Uri "https://github.com/{owner}/{repo}/releases/download/v1.0.0/script-name.ps1" | Invoke-Expression
-```
-
-### Production Deployment
-
-For production environments, the recommended approach is:
-
-1. **Use the automated installer** for validated deployments
-2. **Verify checksums** to ensure script integrity
-3. **Test in isolated environments** before production deployment
-4. **Use proper execution policies** and security controls
-5. **Monitor script execution** through the built-in logging framework
-
-### Why Not Compiled Scripts?
-
-For PowerShell active response scripts, raw `.ps1` files with metadata headers provide the best balance of:
-
-- **Transparency**: Source code is visible and auditable
-- **Flexibility**: Easy to modify for specific environments
-- **Compatibility**: Works across different PowerShell versions and platforms
-- **Security**: Can be signed and verified without complex packaging
-- **Debugging**: Easier to troubleshoot and customize when needed
-
-However, for environments requiring additional security or deployment simplification, consider:
-- **Code signing** with digital certificates
-- **Module packaging** for reusable components
-- **PowerShell galleries** for internal distribution
-- **Group Policy deployment** for enterprise environments
+---
 
 ## License
 
-This template is provided as-is for security automation and incident response purposes.
+This template is provided as-is for security automation and
