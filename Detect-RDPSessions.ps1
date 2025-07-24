@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-  [int]$IdleThresholdMinutes = 30,  
+  [int]$IdleThresholdMinutes = 30,
   [string]$LogPath = "$env:TEMP\Detect-RDPSessions.log",
   [string]$ARLog = 'C:\Program Files (x86)\ossec-agent\active-response\active-responses.log'
 )
@@ -9,12 +9,10 @@ $ErrorActionPreference = 'Stop'
 $HostName = $env:COMPUTERNAME
 $LogMaxKB = 100
 $LogKeep = 5
+$runStart = Get-Date
 
 function Write-Log {
-  param(
-    [string]$Message,
-    [ValidateSet('INFO','WARN','ERROR','DEBUG')]$Level = 'INFO'
-  )
+  param([string]$Message, [ValidateSet('INFO','WARN','ERROR','DEBUG')]$Level = 'INFO')
   $ts = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss.fff')
   $line = "[$ts][$Level] $Message"
   switch ($Level) {
@@ -40,7 +38,17 @@ function Rotate-Log {
 }
 
 Rotate-Log
-$runStart = Get-Date
+
+try {
+  if (Test-Path $ARLog) {
+    Remove-Item -Path $ARLog -Force -ErrorAction Stop
+  }
+  New-Item -Path $ARLog -ItemType File -Force | Out-Null
+  Write-Log "Active response log cleared for fresh run."
+} catch {
+  Write-Log "Failed to clear ${ARLog}: $($_.Exception.Message)" 'WARN'
+}
+
 Write-Log "=== SCRIPT START : Detect RDP Sessions ==="
 
 try {
@@ -54,10 +62,10 @@ try {
       $parts = $line -split '\s+', 6
       if ($parts.Count -ge 6) {
         $session = [PSCustomObject]@{
-          user       = $parts[0]
+          user = $parts[0]
           session_id = $parts[2]
-          state      = $parts[3]
-          idle_time  = $parts[4]
+          state = $parts[3]
+          idle_time = $parts[4]
           logon_time = $parts[5]
           flagged_reasons = @()
         }
@@ -73,25 +81,25 @@ try {
   $timestamp = (Get-Date).ToString('o')
 
   $FullReport = @{
-    host        = $HostName
-    timestamp   = $timestamp
-    action      = "detect_rdp_sessions"
+    host = $HostName
+    timestamp = $timestamp
+    action = "detect_rdp_sessions"
     session_count = $Sessions.Count
-    sessions    = $Sessions
+    sessions = $Sessions
   }
 
   $FlaggedOnly = @{
-    host             = $HostName
-    timestamp        = $timestamp
-    action           = "detect_rdp_sessions_flagged"
-    flagged_count    = ($Sessions | Where-Object { $_.flagged_reasons.Count -gt 0 }).Count
+    host = $HostName
+    timestamp = $timestamp
+    action = "detect_rdp_sessions_flagged"
+    flagged_count = ($Sessions | Where-Object { $_.flagged_reasons.Count -gt 0 }).Count
     flagged_sessions = $Sessions | Where-Object { $_.flagged_reasons.Count -gt 0 }
   }
 
   $FullReport | ConvertTo-Json -Depth 5 -Compress | Out-File -FilePath $ARLog -Append -Encoding ascii -Width 2000
   $FlaggedOnly | ConvertTo-Json -Depth 5 -Compress | Out-File -FilePath $ARLog -Append -Encoding ascii -Width 2000
 
-  Write-Log "JSON reports (full + flagged) appended to $ARLog" 'INFO'
+  Write-Log "JSON reports (full + flagged) written to $ARLog"
 
   Write-Host "`n=== Active RDP Session Report ==="
   Write-Host "Host: $HostName"
@@ -103,19 +111,17 @@ try {
   } else {
     Write-Host "No active RDP sessions."
   }
-}
-catch {
+} catch {
   Write-Log $_.Exception.Message 'ERROR'
   $errorLog = [pscustomobject]@{
     timestamp = (Get-Date).ToString('o')
-    host      = $HostName
-    action    = "detect_rdp_sessions"
-    status    = "error"
-    error     = $_.Exception.Message
+    host = $HostName
+    action = "detect_rdp_sessions"
+    status = "error"
+    error = $_.Exception.Message
   }
   $errorLog | ConvertTo-Json -Compress | Out-File -FilePath $ARLog -Append -Encoding ascii -Width 2000
-}
-finally {
+} finally {
   $dur = [int]((Get-Date) - $runStart).TotalSeconds
   Write-Log "=== SCRIPT END : duration ${dur}s ==="
 }
