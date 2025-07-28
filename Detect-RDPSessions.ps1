@@ -104,6 +104,8 @@ try {
     action    = "detect_rdp_sessions"
     status    = "error"
     error     = $_.Exception.Message
+    copilot_soar = $true
+  
   }
   $json = $errorObj | ConvertTo-Json -Compress
   $tempFile = "$env:TEMP\arlog.tmp"
