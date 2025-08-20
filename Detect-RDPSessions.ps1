@@ -74,6 +74,7 @@ try {
     total_sessions   = $Sessions.Count
     sessions         = $Sessions
     flagged_sessions = $Sessions | Where-Object { $_.flagged_reasons.Count -gt 0 }
+    copilot_action = $true
   }
   $json = $Report | ConvertTo-Json -Depth 5 -Compress
   $tempFile = "$env:TEMP\arlog.tmp"
@@ -104,7 +105,7 @@ try {
     action    = "detect_rdp_sessions"
     status    = "error"
     error     = $_.Exception.Message
-    copilot_soar = $true
+    copilot_action = $true
   
   }
   $json = $errorObj | ConvertTo-Json -Compress
@@ -119,3 +120,4 @@ try {
   $dur = [int]((Get-Date) - $runStart).TotalSeconds
   Write-Log "=== SCRIPT END : duration ${dur}s ==="
 }
+
