@@ -1,5 +1,5 @@
 {
-  "active_response_name": "WINDOWS-DETECT-RDP-SESSIONS-ACTIVERESPONSE",
+  "copilot_action_name": "WINDOWS-DETECT-RDP-SESSIONS-ACTIVERESPONSE",
   "description": "Detects active RDP sessions on a Windows system, reports session details, and flags sessions idle for longer than a configurable threshold. Outputs NDJSON with session metadata, flagged sessions, and relevant audit data, writing atomically to the Active Response log with .new fallback if locked.",
   "technology": "Windows",
   "icon": "windows",
