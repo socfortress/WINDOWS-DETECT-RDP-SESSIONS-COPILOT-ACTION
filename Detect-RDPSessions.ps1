@@ -1,20 +1,16 @@
 [CmdletBinding()]
 param(
   [int]$IdleThresholdMinutes = 30,
-  [string]$Arg1,
   [string]$LogPath = "$env:TEMP\Detect-RDPSessions.log",
   [string]$ARLog   = 'C:\Program Files (x86)\ossec-agent\active-response\active-responses.log'
 )
-
-if ($Arg1 -and -not $PSBoundParameters.ContainsKey('IdleThresholdMinutes')) {
-  try { $IdleThresholdMinutes = [int]$Arg1 } catch {}
-}
 
 $ErrorActionPreference = 'Stop'
 $HostName  = $env:COMPUTERNAME
 $LogMaxKB  = 100
 $LogKeep   = 5
 $runStart  = Get-Date
+
 function Write-Log {
   param([string]$Message, [ValidateSet('INFO','WARN','ERROR','DEBUG')]$Level = 'INFO')
   $ts = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss.fff')
@@ -40,14 +36,20 @@ function Rotate-Log {
   }
 }
 
-function NowZ { (Get-Date).ToString('yyyy-MM-dd HH:mm:sszzz') }
+function To-ISO8601 {
+  param($dt)
+  if ($dt -and $dt -is [datetime] -and $dt.Year -gt 1900) { $dt.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ') } else { $null }
+}
+
+function New-NdjsonLine { param([hashtable]$Data) ($Data | ConvertTo-Json -Compress -Depth 7) }
 
 function Write-NDJSONLines {
   param([string[]]$JsonLines,[string]$Path=$ARLog)
   $tmp = Join-Path $env:TEMP ("arlog_{0}.tmp" -f ([guid]::NewGuid().ToString("N")))
   $dir = Split-Path -Parent $Path
   if ($dir -and -not (Test-Path $dir)) { New-Item -Path $dir -ItemType Directory -Force | Out-Null }
-  Set-Content -Path $tmp -Value ($JsonLines -join [Environment]::NewLine) -Encoding ascii -Force
+  $payload = ($JsonLines -join [Environment]::NewLine) + [Environment]::NewLine
+  Set-Content -Path $tmp -Value $payload -Encoding ascii -Force
   try { Move-Item -Path $tmp -Destination $Path -Force } catch { Move-Item -Path $tmp -Destination ($Path + '.new') -Force }
 }
 
@@ -58,16 +60,15 @@ function Parse-IdleMinutes {
   if ($s -in @('none','.')) { return 0 }
   if ($s -match '^(\d+)\+(\d+):(\d+)$') { return ([int]$matches[1])*1440 + ([int]$matches[2])*60 + ([int]$matches[3]) }
   if ($s -match '^(\d+):(\d+)$')       { return ([int]$matches[1])*60 + ([int]$matches[2]) }
-  if ($s -match '^(\d+)\+$')           { return ([int]$matches[1])*1440 } # days only
-  if ($s -match '^\d+$')               { return [int]$s }                  # minutes
+  if ($s -match '^(\d+)\+$')           { return ([int]$matches[1])*1440 } 
+  if ($s -match '^\d+$')               { return [int]$s }                 
   return 0
 }
 
 Rotate-Log
-Write-Log "=== SCRIPT START : Detect RDP Sessions (threshold=${IdleThresholdMinutes}m) ==="
+Write-Log "=== SCRIPT START : Detect RDP Sessions (host=$HostName, threshold=${IdleThresholdMinutes}m) ==="
 
-$lines = @()
-$ts    = NowZ
+$tsNow = To-ISO8601 (Get-Date)
 
 try {
   $quserOutput = quser 2>$null
@@ -87,13 +88,11 @@ try {
         $logon  = $parts[5]
 
         $idleMin = Parse-IdleMinutes $idle
-        $flagged = $false
+        $flagged = $idleMin -ge $IdleThresholdMinutes
         $reasons = @()
-
-        if ($idleMin -ge $IdleThresholdMinutes) {
-          $flagged = $true
-          $reasons += "Idle ${idleMin}m (>= ${IdleThresholdMinutes}m)"
-          Write-Log ("Flagged: {0} idle {1} ({2}m)" -f $user, $idle, $idleMin) 'WARN'
+        if ($flagged) {
+          $reasons += "idle_${idleMin}m_ge_threshold_${IdleThresholdMinutes}m"
+          Write-Log ("Flagged: user={0} sid={1} state={2} idle={3} ({4}m)" -f $user,$sid,$state,$idle,$idleMin) 'WARN'
         }
 
         $Sessions += [pscustomobject]@{
@@ -113,25 +112,31 @@ try {
   }
 
   $flaggedSessions = $Sessions | Where-Object { $_.flagged }
+  $countAll        = ($Sessions | Measure-Object).Count
+  $countFlagged    = ($flaggedSessions | Measure-Object).Count
 
-  $lines += ([pscustomobject]@{
-    timestamp      = $ts
+  $lines = New-Object System.Collections.ArrayList
+
+  [void]$lines.Add( (New-NdjsonLine @{
+    timestamp      = $tsNow
     host           = $HostName
     action         = 'detect_rdp_sessions'
     copilot_action = $true
-    type           = 'verify_source'
+    item           = 'verify_source'
+    description    = 'RDP/Terminal Services sessions parsed from quser output'
     source         = 'quser'
     exit_code      = $quserExit
-    parsed_rows    = $Sessions.Count
-  } | ConvertTo-Json -Compress -Depth 5)
+    parsed_rows    = $countAll
+  }) )
 
   foreach ($s in $Sessions) {
-    $lines += ([pscustomobject]@{
-      timestamp      = $ts
+    [void]$lines.Add( (New-NdjsonLine @{
+      timestamp      = $tsNow
       host           = $HostName
       action         = 'detect_rdp_sessions'
       copilot_action = $true
-      type           = 'session'
+      item           = 'session'
+      description    = "User '$($s.user)' session $($s.session_id) state=$($s.state); idle=$($s.idle_time) ($($s.idle_minutes)m); flagged=$($s.flagged)"
       user           = $s.user
       session_id     = $s.session_id
       state          = $s.state
@@ -140,31 +145,45 @@ try {
       logon_time     = $s.logon_time
       flagged        = $s.flagged
       reasons        = $s.flagged_reasons
-    } | ConvertTo-Json -Compress -Depth 5)
+      threshold_m    = $IdleThresholdMinutes
+    }) )
   }
 
-  $summary = [pscustomobject]@{
-    timestamp        = $ts
+  if ($countAll -eq 0) {
+    [void]$lines.Add( (New-NdjsonLine @{
+      timestamp      = $tsNow
+      host           = $HostName
+      action         = 'detect_rdp_sessions'
+      copilot_action = $true
+      item           = 'status'
+      status         = 'no_results'
+      description    = 'No active sessions parsed from quser'
+    }) )
+  }
+
+  # summary first
+  $summary = New-NdjsonLine @{
+    timestamp        = $tsNow
     host             = $HostName
     action           = 'detect_rdp_sessions'
     copilot_action   = $true
-    type             = 'summary'
+    item             = 'summary'
+    description      = 'Run summary and counts'
     idle_threshold_m = $IdleThresholdMinutes
-    total_sessions   = $Sessions.Count
-    flagged_sessions = ($flaggedSessions | Measure-Object).Count
+    total_sessions   = $countAll
+    flagged_sessions = $countFlagged
     duration_s       = [math]::Round(((Get-Date)-$runStart).TotalSeconds,1)
   }
-
-  $lines = @(( $summary | ConvertTo-Json -Compress -Depth 5 )) + $lines
+  $lines = ,$summary + $lines
 
   Write-NDJSONLines -JsonLines $lines -Path $ARLog
-  Write-Log ("NDJSON written to {0} ({1} lines)" -f $ARLog,$lines.Count) 'INFO'
+  Write-Log ("Wrote {0} NDJSON record(s) to {1}" -f $lines.Count, $ARLog) 'INFO'
 
   Write-Host "`n=== Active RDP Session Report ==="
   Write-Host "Host: $HostName"
-  Write-Host "Total Sessions Found: $($Sessions.Count)"
-  Write-Host "Idle Sessions (>$IdleThresholdMinutes min): $(( $flaggedSessions | Measure-Object ).Count)`n"
-  if ($Sessions.Count -gt 0) {
+  Write-Host "Total Sessions Found: $countAll"
+  Write-Host "Idle Sessions (>= $IdleThresholdMinutes min): $countFlagged`n"
+  if ($countAll -gt 0) {
     $Sessions | Select-Object user, session_id, state, idle_time, logon_time | Format-Table -AutoSize
   } else {
     Write-Host "No active RDP sessions."
@@ -172,15 +191,16 @@ try {
 }
 catch {
   Write-Log $_.Exception.Message 'ERROR'
-  $err = [pscustomobject]@{
-    timestamp      = NowZ
+  $err = New-NdjsonLine @{
+    timestamp      = To-ISO8601 (Get-Date)
     host           = $HostName
     action         = 'detect_rdp_sessions'
     copilot_action = $true
-    type           = 'error'
+    item           = 'error'
+    description    = 'Unhandled error'
     error          = $_.Exception.Message
   }
-  Write-NDJSONLines -JsonLines @(($err | ConvertTo-Json -Compress)) -Path $ARLog
+  Write-NDJSONLines -JsonLines @($err) -Path $ARLog
   Write-Log "Error NDJSON written." 'INFO'
 }
 finally {
