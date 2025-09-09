@@ -3,7 +3,7 @@
   "description": "Detects active RDP/Terminal Services sessions, reports user, session ID, state, idle time, and flags sessions idle beyond the configured threshold. Emits NDJSON entries including verification, per-session details, and summary.",
   "technology": "Windows",
   "icon": "windows",
-  "repo_url": "https://raw.githubusercontent.com/socfortress/WINDOWS-DETECT-RDP-SESSIONS-COPILOT-ACTION/refs/heads/main",
+  "repo_url": "https://raw.githubusercontent.com/socfortress/WINDOWS-DETECT-RDP-SESSIONS-COPILOT-ACTION/refs/heads/main/Detect-RDPSessions.ps1",
   "script_name": "Detect-RDPSessions.ps1",
   "version": "1.0.0",
   "last_updated": "2025-09-09T00:00:00Z"
